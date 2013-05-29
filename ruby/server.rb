@@ -15,6 +15,7 @@ class Prover
 
 	def initialize( host=DEFAULT_HOST, port=DEFAULT_PORT )
 		@socket = TCPServer.new( host, port )
+		puts "Listening on %s:%d" % [ host, port ]
 		async.run
 	end
 
@@ -34,45 +35,31 @@ class Prover
 
 
 	def handle_connection( conn )
-		_, port, addr = conn.peeraddr
+		print '.'
+		conn.write( "ok\n" )
 
-		puts "connection on port %d from %s" % [ port, addr ]
-		bytes = conn.write( "ok\n" )
+		hash = conn.readpartial( 4096 ).chomp
+		conn.write( hash + ':' + work(hash) )
 
-		puts "  [#{port}] wrote greeting (%d bytes). Reading..." % [ bytes ]
-		hash = conn.readpartial( 4096 )
-		hash.chomp!
-
-		puts "  [#{port}] read the hash (%p)" % [ hash ]
-		nonce = work( hash )
-		result = [hash, nonce].map( &:to_s ).join(':')
-		conn.write( result )
-
-		puts "  [#{port}] wrote the result: %p" % [ result ]
 		conn.close
 	end
 
 
 	def work( input )
-		puts "Starting work"
-		start = Time.now
 		id = 0
 		nonce = id.to_s( 16 )
+
 		until verify( input, nonce )
 			id += 1
 			nonce = id.to_s( 16 )
 		end
-		puts "Work done in %0.3fs" % [ Time.now - start ]
 
 		return nonce
 	end
 
 
 	def verify( input, nonce )
-		hash = Digest::SHA256.new
-		hash.update( input )
-		hash.update( nonce )
-
+		hash = Digest::SHA256.new.update( input ).update( nonce )
 		return hash.hexdigest.end_with?( '00' )
 	end
 
@@ -85,14 +72,12 @@ end # Prover
 
 
 if __FILE__ == $0
-	Encoding.default_external = Encoding::US_ASCII
-
 	if defined?( Celluloid )
 		supervisor = Prover.supervise( *ARGV )
 		trap(:INT) { supervisor.terminate; exit }
 		sleep
 	else
-		Prover.new( *ARGV ).run
+		Prover.new( *ARGV )
 	end
 end
 
